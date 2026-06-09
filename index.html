@@ -181,10 +181,13 @@ select.fiche-input{cursor:pointer}
     <button class="depth-btn" data-c="status" onclick="setColorMode('status')" style="font-size:11px">Par statut</button>
     <div class="rail-label">Tailles forcées</div>
     <button class="act-btn" onclick="resetAllManual()" style="margin-top:0">↺ Tout proportionnel</button>
+    <div class="rail-label">Boîtes masquées</div>
+    <button class="act-btn" id="resurrect-btn" onclick="resurrectAll()" style="margin-top:0">👁 Réafficher les masquées (0)</button>
+    <div style="font-size:10px;color:var(--text3);margin-top:4px">Masquer une boîte : <b>Alt + double-clic</b></div>
     <div class="rail-label">Sauvegarde</div>
     <div class="help-box" style="margin-bottom:7px">Sauvegarde <b>automatique</b> dans ce navigateur à chaque changement. <b>Exporter</b> pour garder un fichier de secours.</div>
     <div class="rail-label">Aide</div>
-    <div class="help-box"><b>Redimensionner</b> : pousse la ligne entre 2 boîtes (↔ / ↕).<br><b>Déplacer</b> : glisse une boîte sur une autre.<br><b>Fiche projet</b> : double-clic sur une boîte.<br><b>Zoomer / couleur</b> : clic droit.<br><b>Créer</b> : « + Boîte » ou clic sur le vide.</div>
+    <div class="help-box"><b>Redimensionner</b> : pousse la ligne entre 2 boîtes (↔ / ↕).<br><b>Déplacer</b> : glisse une boîte sur une autre.<br><b>Drill down</b> : double-clic (entre dans la boîte).<br><b>Fiche complète</b> : Ctrl + double-clic.<br><b>Sélection multiple</b> : Ctrl + clic.<br><b>Panneau rapide</b> : triple-clic.<br><b>Créer</b> : « + Boîte » ou clic sur le vide.</div>
     <div class="rail-label">Légende statut</div>
     <div id="legend"></div>
   </div>
@@ -252,10 +255,11 @@ function mkNode(name,parent=null,opts={}){const idx=nodes.filter(n=>n.parent===p
   // Suivi & avancement
   travailReel:'',travailRestant:'',debutReel:'',finReelle:'',
   // Qualificatifs & pilotage
-  priorite:500,critique:false,remarques:'',tag1:'',drapeau1:false,
+  priorite:500,critique:false,remarques:'',tag1:'',drapeau1:false,hidden:false,
   urgence:'',importance:'',phase:'',avct:'',typologie:'',satisfaction:''
 },opts);}
-function kids(id){return nodes.filter(n=>n.parent===id);}
+function kidsAll(id){return nodes.filter(n=>n.parent===id);}
+function kids(id){return nodes.filter(n=>n.parent===id&&!n.hidden);}
 function baseWeight(n){const ch=kids(n.id);if(!ch.length)return Math.max(n.weight||1,EMPTY_FLOOR);return ch.reduce((s,c)=>s+effWeight(c),0);}
 function effWeight(n){const f=(n.sizeFactor!=null?n.sizeFactor:1);return baseWeight(n)*f;}
 
@@ -286,6 +290,12 @@ function exportData(){
   a.href=url;a.download='TimeMaster_'+stamp+'.json';a.click();URL.revokeObjectURL(url);
   toast('Fichier exporté');
 }
+// ===== MASQUAGE / RÉSURRECTION =====
+function hideBranch(n){if(!n)return;n.hidden=true;if(selection.has(n.id))selection.delete(n.id);persist();draw();updateResurrectBtn();updateSelBar();toast("« "+trunc2(n.name,22)+" » masquée (réversible)");}
+function countHidden(){return nodes.filter(n=>n.hidden).length;}
+function resurrectAll(){let c=0;nodes.forEach(n=>{if(n.hidden){n.hidden=false;c++;}});persist();draw();updateResurrectBtn();toast(c?(c+" boîtes réaffichées"):"Aucune boîte masquée");}
+function updateResurrectBtn(){const b=document.getElementById("resurrect-btn");if(!b)return;const c=countHidden();b.textContent="👁 Réafficher les masquées ("+c+")";b.style.opacity=c>0?"1":"0.5";}
+
 // ===== MULTI-SÉLECTION (Ctrl+clic) =====
 function toggleSelect(n){
   if(selection.has(n.id))selection.delete(n.id);else selection.add(n.id);
@@ -375,7 +385,7 @@ function cellOut(key,n){
 }
 function exportExcel(){
   if(typeof XLSX==='undefined'){toast('Librairie Excel non chargée, réessaie dans 2 s');return;}
-  const ordered=[];function walk(pid){sortSiblings(kids(pid),pid).forEach(n=>{ordered.push(n);walk(n.id);});}walk(null);
+  const ordered=[];function walk(pid){sortSiblings(kidsAll(pid),pid).forEach(n=>{ordered.push(n);walk(n.id);});}walk(null);
   const header=['ID','WBS',...XLSX_LEVELCOLS,...XLSX_FIELDS.map(f=>f[1])];
   const aoa=[header];
   ordered.forEach((n,i)=>{
@@ -489,6 +499,7 @@ function renderNode(n,depth){if(!n._r)return;const{x,y,w,h}=n._r;if(w<1||h<1)ret
 function wrapText(t,mx,maxLines,fsize){ctx.font='500 '+fsize+'px sans-serif';const words=t.split(' ');const lines=[];let cur='';for(const w of words){const test=cur?cur+' '+w:w;if(ctx.measureText(test).width<=mx)cur=test;else{if(cur)lines.push(cur);cur=w;if(lines.length>=maxLines-1)break;}}if(cur&&lines.length<maxLines)lines.push(cur);if(!lines.length)lines.push(trunc(t,mx));const last=lines[lines.length-1];if(ctx.measureText(last).width>mx)lines[lines.length-1]=trunc(last,mx);return lines;}
 function trunc(t,mx){if(ctx.measureText(t).width<=mx)return t;while(t.length>1&&ctx.measureText(t+'…').width>mx)t=t.slice(0,-1);return t+'…';}
 function hitTest(px,py){let best=null;drawnRects.forEach(r=>{if(px>=r.x&&px<=r.x+r.w&&py>=r.y&&py<=r.y+r.h){if(!best||r.depth>best.depth)best=r;}});return best;}
+function hitTopLevel(px,py){let best=null;drawnRects.forEach(r=>{if(r.depth===1&&px>=r.x&&px<=r.x+r.w&&py>=r.y&&py<=r.y+r.h)best=r;});return best;}
 function isDescendant(c,a){let cur=c;while(cur!=null){if(cur===a)return true;const n=nodes.find(x=>x.id===cur);cur=n?n.parent:null;}return false;}
 const EDGE=7;
 function findBorderAt(px,py){let best=null,bestDist=EDGE+1;for(let i=0;i<drawnRects.length;i++){const A=drawnRects[i];for(let j=0;j<drawnRects.length;j++){if(i===j)continue;const B=drawnRects[j];if(A.n.parent!==B.n.parent)continue;if(A.depth!==B.depth)continue;if(Math.abs((A.x+A.w)-B.x)<2){const y0=Math.max(A.y,B.y),y1=Math.min(A.y+A.h,B.y+B.h);if(y1-y0>10){const pos=A.x+A.w;const d=Math.abs(px-pos);if(d<bestDist&&py>=y0&&py<=y1){bestDist=d;best={axis:'v',pos,a0:y0,a1:y1,left:A.n,right:B.n};}}}if(Math.abs((A.y+A.h)-B.y)<2){const x0=Math.max(A.x,B.x),x1=Math.min(A.x+A.w,B.x+B.w);if(x1-x0>10){const pos=A.y+A.h;const d=Math.abs(py-pos);if(d<bestDist&&px>=x0&&px<=x1){bestDist=d;best={axis:'h',pos,a0:x0,a1:x1,top:A.n,bottom:B.n};}}}}}return best;}
@@ -503,7 +514,7 @@ canvas.addEventListener('mousemove',e=>{const r=canvas.getBoundingClientRect();c
 canvas.addEventListener('mouseup',e=>{if(drag.mode==='border'&&drag.active){toast('Frontière déplacée');persist();drag={active:false,node:null,mode:null,target:null};draw();if(panelNode)updateSurfaceInfo(panelNode);return;}if(drag.mode==='move'){if(drag.active){justDragged=true;if(drag.target){const t=drag.target;let movers;if(selection.size>0&&selection.has(drag.node.id)){movers=[...selection].map(id=>nodes.find(n=>n.id===id)).filter(Boolean);}else{movers=[drag.node];}movers=movers.filter(m=>m.id!==t.id&&!isDescendant(t.id,m.id));movers.forEach(m=>{m.parent=t.id;m.color=t.color;});toast(movers.length>1?(movers.length+' boîtes déplacées dans « '+trunc2(t.name,20)+' »'):('« '+trunc2(drag.node.name,20)+' » déplacé dans « '+trunc2(t.name,20)+' »'));persist();}}drag={active:false,node:null,mode:null,target:null};canvas.style.cursor='crosshair';draw();}});
 function trunc2(t,n){return t.length>n?t.slice(0,n-1)+'…':t;}
 let lastClick={t:0,id:null};let selection=new Set();let justDragged=false;
-canvas.addEventListener('click',e=>{if(drag.mode==='border')return;if((drag.mode==='move'&&!drag.active)||drag.mode===null){const r=canvas.getBoundingClientRect();const px=e.clientX-r.left,py=e.clientY-r.top;if(findBorderAt(px,py))return;const hit=hitTest(px,py);if(justDragged){justDragged=false;drag={active:false,node:null,mode:null,target:null};return;}if((e.ctrlKey||e.metaKey)&&hit){toggleSelect(hit.n);drag={active:false,node:null,mode:null,target:null};return;}const now=Date.now();if(hit&&now-lastClick.t<420&&lastClick.id===hit.n.id){lastClick.count=(lastClick.count||1)+1;if(lastClick.count>=3){closeFiche();openPanel(hit.n);}else{openFiche(hit.n);}lastClick.t=now;drag={active:false,node:null,mode:null};return;}lastClick={t:now,id:hit?hit.n.id:null,count:1};if(!hit){if(selection.size>0){clearSelection();}else{showDialog(currentParent);}}}drag={active:false,node:null,mode:null,target:null};});
+canvas.addEventListener('click',e=>{if(drag.mode==='border')return;if((drag.mode==='move'&&!drag.active)||drag.mode===null){const r=canvas.getBoundingClientRect();const px=e.clientX-r.left,py=e.clientY-r.top;if(findBorderAt(px,py))return;const hit=hitTest(px,py);if(justDragged){justDragged=false;drag={active:false,node:null,mode:null,target:null};return;}const now=Date.now();if((e.ctrlKey||e.metaKey)&&hit){if(lastClick.id===hit.n.id&&now-lastClick.t<420&&lastClick.ctrl){toggleSelect(hit.n);openFiche(hit.n);lastClick={t:0,id:null,count:1,ctrl:false};drag={active:false,node:null,mode:null,target:null};return;}toggleSelect(hit.n);lastClick={t:now,id:hit.n.id,count:1,ctrl:true};drag={active:false,node:null,mode:null,target:null};return;}if(hit&&now-lastClick.t<420&&lastClick.id===hit.n.id&&!lastClick.ctrl){lastClick.count=(lastClick.count||1)+1;if(lastClick.count>=3){closeFiche();openPanel(hit.n);}else{if(e.altKey){if(hit)hideBranch(hit.n);}else{var topb=hitTopLevel(px,py);if(topb&&kids(topb.n.id).length){closeFiche();closePanel();currentParent=topb.n.id;draw();updateBC();}else{openFiche((topb?topb.n:hit.n));}}}lastClick.t=now;drag={active:false,node:null,mode:null};return;}lastClick={t:now,id:hit?hit.n.id:null,count:1,ctrl:false};if(!hit){if(selection.size>0){clearSelection();}else{showDialog(currentParent);}}}drag={active:false,node:null,mode:null,target:null};});
 canvas.addEventListener('contextmenu',e=>{e.preventDefault();const r=canvas.getBoundingClientRect();const hit=hitTest(e.clientX-r.left,e.clientY-r.top);if(!hit)return;openCtxMenu(hit.n,e.clientX,e.clientY);});
 function openCtxMenu(node,x,y){
   const m=document.getElementById('ctxmenu');m.innerHTML='';
@@ -554,7 +565,7 @@ function addBoxHere(){showDialog(currentParent);}
 function goUp(){if(currentParent===null)return;const n=nodes.find(x=>x.id===currentParent);currentParent=n?n.parent:null;draw();updateBC();}
 function resetView(){currentParent=null;draw();updateBC();}
 function pathOf(id){const p=[];let cur=id;while(cur!=null){const n=nodes.find(x=>x.id===cur);if(!n)break;p.unshift(n.name);cur=n.parent;}return p;}
-function updateBC(){const lvl=pathOf(currentParent).length+1;document.getElementById('breadcrumb').textContent=['Racine',...pathOf(currentParent)].join(' › ')+'  ('+levelName(lvl)+')';document.getElementById('add-box-btn').textContent='+ '+levelName(lvl);}
+function updateBC(){const names=pathOf(currentParent);const lvl=names.length+1;const segs=['Racine'].concat(names.map((nm,i)=>'N'+(i+1)+' ('+nm+')'));document.getElementById('breadcrumb').textContent=segs.join('  ›  ');document.getElementById('add-box-btn').textContent='+ '+levelName(lvl);}
 
 let dlgParent=null;
 function showDialog(p){dlgParent=p;const lvl=pathOf(p).length+1;document.getElementById('dlg-title').textContent='Nouvelle boîte — '+levelName(lvl);document.getElementById('dlg-sub').textContent=p===null?'Ajoutée à la racine ('+levelName(1)+')':'Ajoutée dans « '+(nodes.find(x=>x.id===p)||{}).name+' »';document.getElementById('dlg-input').value='';document.getElementById('dialog').classList.add('vis');setTimeout(()=>document.getElementById('dlg-input').focus(),50);}
@@ -759,7 +770,7 @@ function seed(){
 window.addEventListener('resize',resize);
 // démarrage : on charge la sauvegarde, sinon on amorce avec les données Fichet/Perso/État
 if(!loadStored()){seed();persist();}
-syncControls();buildLegend();resize();draw();updateBC();
+syncControls();buildLegend();resize();draw();updateBC();updateResurrectBtn();
 setTimeout(()=>toast('Time Master prêt — sauvegarde automatique active'),400);
 </script>
 </body>
